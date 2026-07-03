@@ -6,7 +6,12 @@ import os
 
 st.set_page_config(page_title="Algorithmic Trading Dashboard", layout="wide")
 
+# Track which data engine was picked
+source_used = "None"
+rows_loaded = 0
+
 def get_data():
+    global source_used, rows_loaded
     # 1. Try connecting to the local MySQL database first
     try:
         db_user = 'root'
@@ -19,6 +24,8 @@ def get_data():
         query = "SELECT * FROM TradingSignals ORDER BY Date ASC;"
         df = pd.read_sql(query, con=engine)
         if not df.empty:
+            source_used = "Local MySQL Database"
+            rows_loaded = len(df)
             return df
     except Exception:
         pass  
@@ -26,16 +33,19 @@ def get_data():
     # 2. Fallback: Check the file directly inside the dashboard folder
     local_backup = os.path.join(os.path.dirname(__file__), 'trading_signals_backup.csv')
     if os.path.exists(local_backup):
-        st.sidebar.warning("Cloud Mode active (Using folder-level database backup)")
+        source_used = "dashboard/trading_signals_backup.csv (Folder-level backup)"
         df = pd.read_csv(local_backup)
         df['Date'] = df['Date'].astype(str)
+        rows_loaded = len(df)
         return df
 
     # 3. Last Resort Fallback
     fallback_csv = 'data/processed/master_stock_prices.csv'
     if os.path.exists(fallback_csv):
+        source_used = "data/processed/master_stock_prices.csv (Old fallback)"
         df = pd.read_csv(fallback_csv)
         df['Date'] = df['Date'].astype(str)
+        rows_loaded = len(df)
         return df
 
     raise FileNotFoundError("Could not connect to MySQL or find any fallback data files.")
@@ -45,6 +55,10 @@ try:
 except Exception as e:
     st.error(f"Data loading engine failed! Error: {e}")
     st.stop()
+
+# --- DIAGNOSTIC BANNER (Look at this on your website) ---
+st.info(f"🔍 **Data Debugger:** Loaded from `{source_used}` | **Total Rows:** {rows_loaded} | **Tickers Found:** {list(df['Ticker'].unique())}")
+st.markdown("---")
 
 # --- Dashboard Layout Structure ---
 st.title("📈 Quantitative Trading Analytics Dashboard")
@@ -81,6 +95,4 @@ if 'MA50' in filtered_df.columns:
     fig.add_trace(go.Scatter(x=filtered_df['Date'], y=filtered_df['MA50'], name='50-Day SMA', line=dict(color='#2ca02c', width=1.5, dash='dot')))
 
 fig.update_layout(template="plotly_dark", xaxis_title="Timeline", yaxis_title="Price (USD)", margin=dict(l=20, r=20, t=20, b=20), height=500, hovermode="x unified")
-
-# Fixed the warning message layout parameter here:
 st.plotly_chart(fig, width='stretch')
