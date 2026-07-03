@@ -7,7 +7,7 @@ import os
 st.set_page_config(page_title="Algorithmic Trading Dashboard", layout="wide")
 
 def get_data():
-    # 1. Try connecting to the local MySQL database first
+    # 1. Try connecting to local MySQL database
     try:
         db_user = 'root'
         db_password = 'Trading123'
@@ -23,21 +23,20 @@ def get_data():
     except Exception:
         pass  
         
-    # 2. Fallback: Check the file directly inside the dashboard folder
+    # 2. Primary Fallback: Read folder-level CSV file directly
     local_backup = os.path.join(os.path.dirname(__file__), 'trading_signals_backup.csv')
     if os.path.exists(local_backup):
-        df = pd.read_csv(local_backup)
-        df['Date'] = df['Date'].astype(str)
+        # Force string parsing on columns to stop pandas from hiding unique records
+        df = pd.read_csv(local_backup, dtype={'Ticker': str, 'SignalFlag': str})
         return df
 
     # 3. Last Resort Fallback
     fallback_csv = 'data/processed/master_stock_prices.csv'
     if os.path.exists(fallback_csv):
-        df = pd.read_csv(fallback_csv)
-        df['Date'] = df['Date'].astype(str)
+        df = pd.read_csv(fallback_csv, dtype={'Ticker': str})
         return df
 
-    raise FileNotFoundError("Could not connect to MySQL or find any fallback data files.")
+    raise FileNotFoundError("Could not locate any valid source datasets.")
 
 try:
     df = get_data()
@@ -45,35 +44,46 @@ except Exception as e:
     st.error(f"Data loading engine failed! Error: {e}")
     st.stop()
 
+# --- CRITICAL DATA CLEANING LAYER ---
+# Clean column names (removes hidden spaces or quotes like " Ticker" or "'Ticker'")
+df.columns = df.columns.str.replace(r"['\"]", "", regex=True).str.strip()
+
+# Force standard string transformations on the Ticker column data
+df['Ticker'] = df['Ticker'].astype(str).str.replace(r"['\"]", "", regex=True).str.strip().str.upper()
+df['Date'] = df['Date'].astype(str).str.strip()
+
+# Create a rock-solid, cleaned ticker array
+ticker_list = sorted([str(t) for t in df['Ticker'].unique() if pd.notna(t) and t != ""])
+
 # --- Dashboard Layout Structure ---
 st.title("📈 Quantitative Trading Analytics Dashboard")
 st.markdown("This dashboard pulls live analytics directly from our structured MySQL trading database.")
 st.markdown("---")
 
-# MOVED TO MAIN PAGE: Dropdown menu sits cleanly below the title headers
-ticker_list = sorted(df['Ticker'].dropna().unique())
+# Render selection menu on main axis
 selected_ticker = st.selectbox("🎯 Select Stock Ticker to Analyze:", ticker_list)
 
+# Filter dataset safely
 filtered_df = df[df['Ticker'] == selected_ticker].copy()
 latest_data = filtered_df.iloc[-1]
 
 # Display Real-Time Analytical KPI Metrics
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.metric(label=f"Current {selected_ticker} Price", value=f"${latest_data['Close']:.2f}")
+    st.metric(label=f"Current {selected_ticker} Price", value=f"${float(latest_data['Close']):.2f}")
 with col2:
-    st.metric(label="Daily Return", value=f"{latest_data['DailyReturn']*100:.2f}%")
+    st.metric(label="Daily Return", value=f"{float(latest_data['DailyReturn'])*100:.2f}%")
 with col3:
-    st.metric(label="30-Day Volatility", value=f"{latest_data['Volatility30']:.2f}")
+    st.metric(label="30-Day Volatility", value=f"{float(latest_data['Volatility30']):.2f}")
 with col4:
     signal_key = 'SignalFlag' if 'SignalFlag' in latest_data else ('Signal' if 'Signal' in latest_data else None)
     signal = latest_data[signal_key] if signal_key else "N/A"
-    st.metric(label="Engine Signal", value=str(signal).upper())
+    st.metric(label="Engine Signal", value=str(signal).upper().strip())
 
 st.markdown("---")
 st.subheader(f"{selected_ticker} Price Trend & Moving Averages")
 
-# Construct Interactive Time-Series Charts via Plotly Engine
+# Construct Time-Series Charts
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=filtered_df['Date'], y=filtered_df['Close'], name='Closing Price', line=dict(color='#1f77b4', width=2)))
 
@@ -83,6 +93,4 @@ if 'MA50' in filtered_df.columns:
     fig.add_trace(go.Scatter(x=filtered_df['Date'], y=filtered_df['MA50'], name='50-Day SMA', line=dict(color='#2ca02c', width=1.5, dash='dot')))
 
 fig.update_layout(template="plotly_dark", xaxis_title="Timeline", yaxis_title="Price (USD)", margin=dict(l=20, r=20, t=20, b=20), height=500, hovermode="x unified")
-
-# Fixed structural width parameter warning
 st.plotly_chart(fig, width='stretch')
