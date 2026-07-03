@@ -19,20 +19,14 @@ def get_data():
         query = "SELECT * FROM TradingSignals ORDER BY Date ASC;"
         return pd.read_sql(query, con=engine)
     except Exception as db_error:
-        # Fallback: If database isn't reachable, look for a generated signals backup CSV
-        st.sidebar.warning("Running in Cloud/Offline Mode (Using static CSV data engine)")
+        # Fallback: Read the complete pre-calculated 7500+ row table on the cloud
+        st.sidebar.warning("Running in Cloud Mode (Using analytical database backup)")
         
-        # We check if a fallback file exists, or generate one from our master file
-        processed_csv = 'data/processed/master_stock_prices.csv'
-        if os.path.exists(processed_csv):
-            # This loads the base dataset safely if MySQL is sleeping
-            df = pd.read_csv(processed_csv)
-            # Add simple fallback columns to match the database structure for the UI
-            df['DailyReturn'] = df.groupby('Ticker')['Close'].pct_change()
-            df['MA20'] = df.groupby('Ticker')['Close'].transform(lambda x: x.rolling(20).mean())
-            df['MA50'] = df.groupby('Ticker')['Close'].transform(lambda x: x.rolling(50).mean())
-            df['Volatility30'] = df.groupby('Ticker')['Close'].transform(lambda x: x.rolling(30).std())
-            df['SignalFlag'] = ['BUY' if m20 > m50 else 'SELL' for m20, m50 in zip(df['MA20'], df['MA50'])]
+        # CHANGED: Pointing exactly to your complete exported multi-ticker dataset
+        backup_csv = 'data/processed/trading_signals_backup.csv'
+        if os.path.exists(backup_csv):
+            df = pd.read_csv(backup_csv)
+            df['Date'] = df['Date'].astype(str)
             return df
         else:
             raise db_error
@@ -43,7 +37,6 @@ except Exception as e:
     st.error(f"Data loading failed! Error: {e}")
     st.stop()
 
-# --- The rest of the code stays exactly the same ---
 st.title("📈 Quantitative Trading Analytics Dashboard")
 st.markdown("This dashboard pulls live analytics directly from our structured MySQL trading database.")
 st.markdown("---")
